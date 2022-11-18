@@ -7,7 +7,7 @@ import argparse
 import os
 
 
-def get_answered_posts(data_dir, limit=1000):
+def get_answered_posts(data_dir, limit=None):
     df = spark.read.parquet(os.path.join(data_dir, 'Posts.parquet'))
     # Rename _AcceptedAnswerId to TmpId so that there won't be a duplicate column in following join
     accepted_answer_id_df = df.select('_AcceptedAnswerId').distinct().withColumnRenamed('_AcceptedAnswerId', 'TmpId')
@@ -29,6 +29,8 @@ if __name__ == "__main__":
                    help="Address of the Spark master.")
     p.add_argument("-d", "--data_dir", type=str, required=True,
                    help="Data directory in HDFS.", default='/TermProject/data')
+    p.add_argument("-l", "--limit", type=int, default=None,
+                   help="Limit number of samples to process.")
     args = p.parse_args()
     if args.spark:
         context = SparkContext(appName="Stackoverflow Analysis", master=args.spark).getOrCreate()
@@ -45,7 +47,7 @@ if __name__ == "__main__":
 
 
     print("Getting accepted answers")
-    accepted_answer_posts_df = get_answered_posts(args.data_dir)
+    accepted_answer_posts_df = get_answered_posts(args.data_dir, limit=args.limit)
     print(f"Got {accepted_answer_posts_df.count()} accepted answer posts")
 
     print("Running Sentiment Analysis")
