@@ -29,14 +29,9 @@ python
 
 ```
 
-Running Jupyter notebook from CSU host:
+Running sentiment analyzer (limit 1200 just for example):
+
 ```
-source ~/py38_venv/bin/activate
-cd 435-TermProject
-jupyter notebook --no-browser --port=8091
+python so_analysis.py --spark spark://salem:30333 -d /SO -l 1200
+hadoop fs -ls /SO/PostsWithSentiment.parquet
 ```
-SSH tunnel from your localhost:
-```
-ssh -L 8081:localhost:8081 jborg@salem.cs.colostate.edu
-```
-Navigate to the URL+token provided by the notebook.
