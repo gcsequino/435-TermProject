@@ -1,7 +1,7 @@
 from nltk.sentiment import SentimentIntensityAnalyzer
 from bs4 import BeautifulSoup
 
-class CommentSentimentAnalyer():
+class CommentSentimentAnalyzer():
 
     def __init__(self):
         self.sid = SentimentIntensityAnalyzer("/s/bach/a/class/cs435/cs435a/nltk_data/sentiment/vader_lexicon/vader_lexicon.txt")
@@ -14,7 +14,7 @@ class CommentSentimentAnalyer():
         return BeautifulSoup(comment, "html.parser").text
 
 if __name__ == "__main__":
-    csa = CommentSentimentAnalyer()
+    csa = CommentSentimentAnalyzer()
     x = input("Enter text to analyze\n")
     while x != "":
         print(csa.get_sentiment_polarity(x))
