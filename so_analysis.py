@@ -1,12 +1,16 @@
+from enum import Enum
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import udf, explode, count, col, avg
+from pyspark.sql.functions import udf, explode, count, col, avg, broadcast
 from pyspark.sql.types import MapType, StringType, ArrayType
 from CommentSentimentAnalyzer import CommentSentimentAnalyzer
 import argparse
 import os
 import re
 
+class PostType(Enum):
+    QUESTION = 1
+    ANSWER = 2
 
 def get_answered_posts(spark, data_dir, limit=None):
     df = spark.read.parquet(os.path.join(data_dir, 'Posts.parquet'))
@@ -21,18 +25,56 @@ def get_answered_posts(spark, data_dir, limit=None):
 
     return accepted_answer_posts_df
 
+def split_post_tags(df, tagId="_Tags"):
+    split_tag = udf(lambda tag: re.sub("(^<|>$)", "", tag).split("><") if tag else [], ArrayType(StringType()))
+    split_tags = df.select("*", split_tag(df[tagId]).alias(f"{tagId}_split"))
+    split_tags = split_tags.drop(tagId)
+    split_tags = split_tags.select("*", explode(f"{tagId}_split").alias(f"{tagId}_exploded"))
+    split_tags = split_tags.drop(f"{tagId}_split")
+    split_tags = split_tags.withColumnRenamed(f"{tagId}_exploded", tagId)
+    return split_tags
 
-def get_top_tags(spark: SparkSession, data_dir, limit=None):
-    posts = spark.read.parquet(os.path.join(data_dir, 'Posts.parquet'))
-    post_tags = posts.select("_Tags").dropna().withColumnRenamed("_Tags", "tags")
-    split_tag = udf(lambda tag: re.sub("(^<|>$)", "", tag).split("><"), ArrayType(StringType()))
-    split_tags = post_tags.select(split_tag(post_tags.tags).alias("tags"))
-    all_tags = split_tags.select(explode("tags").alias("tags"))
-    tags = all_tags.groupBy("tags").agg(count("tags").alias("counts")).orderBy("counts", ascending=False)
+def get_top_tags(posts, limit=None):
+    post_tags = posts.select("_Tags").dropna()
+    all_tags = split_post_tags(post_tags, "_Tags")
+    tags = all_tags.groupBy("_Tags").agg(count("_Tags").alias("counts")).orderBy("counts", ascending=False)
     if limit:
         tags = tags.limit(limit)
     return tags
 
+def get_questions_with_tags(posts, tags, limit=None):
+    question_posts = posts.select("_Id", "_Body", "_Tags").where(f"_PostTypeId == 1")
+    question_posts = split_post_tags(question_posts).alias("questions")
+    tags = tags.alias("tags")
+    questions_with_tag = question_posts.join(broadcast(tags), col("questions._Tags") == col("tags._Tags"), "left_semi")
+    if limit:
+        questions_with_tag = questions_with_tag.limit(limit)
+    return questions_with_tag
+
+def get_answers_for_tags(posts, tags, limit=None):
+    question_posts = get_questions_with_tags(posts, tags).alias("questions")
+    answer_posts = posts.select("_Id", "_Body", "_ParentId").where("_PostTypeId == 2").alias("answers")
+    questions_with_answers = question_posts.join(answer_posts, col("questions._Id") == col("answers._ParentId"))
+    answers = questions_with_answers.select(col("answers._Id"), col("answers._Body"), col("questions._Tags"))
+    if limit:
+        answers = answers.limit(limit)
+    return answers
+
+def get_post_sentiments(posts, postType: PostType, tagLimit=None, postLimit=None):
+    top_tags = get_top_tags(posts, tagLimit)
+    if postType == PostType.QUESTION:
+        posts_with_tags = get_questions_with_tags(posts, top_tags, postLimit)
+    elif postType == PostType.ANSWER:
+        posts_with_tags = get_answers_for_tags(posts, top_tags, postLimit)
+    else:
+        print("Uknown post type", postType)
+        return
+    posts_with_tags = add_sentiment(posts_with_tags, "_Body")
+    avg_sentiments = posts_with_tags.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
+                                                                                                avg('negative').alias('average_negative'),
+                                                                                                avg('neutral').alias('average_neutral'),
+                                                                                                avg('compound').alias('average_compound'))
+    return avg_sentiments
 
 def get_experts_by_reputation(users_df, posts_df):
     top_n = 50
@@ -68,7 +110,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("-s", "--spark", type=str, required=False,
                    help="Address of the Spark master.")
-    p.add_argument("-d", "--data_dir", type=str, required=True,
+    p.add_argument("-d", "--data_dir", type=str, required=False,
                    help="Data directory in HDFS.", default='/TermProject/data')
     p.add_argument("-l", "--limit", type=int, default=None,
                    help="Limit number of samples to process.")
@@ -82,18 +124,24 @@ if __name__ == "__main__":
     spark = SparkSession(context)
     context.addPyFile("CommentSentimentAnalyzer.py")
     context.setLogLevel("ERROR")
+    print("Starting ...")
     so_users = spark.read.parquet(os.path.join(args.data_dir, "Users.parquet"))
+    print("Users schema")
     so_users.printSchema()
-    print("User count", so_users.count())
+    print("User count", so_users.count(), end="\n\n")
     so_posts = spark.read.parquet(os.path.join(args.data_dir, "Posts.parquet"))
+    print("Posts schema")
     so_posts.printSchema()
-    print("Post count", so_posts.count())
+    print("Post count", so_posts.count(), end="\n\n")
 
     if args.question:
         if args.question == 1:
-            print(get_top_tags(spark, args.data_dir))
+            top_tag_df = get_top_tags(so_posts, limit=args.limit)
         elif args.question == 2:
-            pass
+            print("Sentiment analysis over 'Question' posts")
+            question_sentiments = get_post_sentiments(so_posts, postType=PostType.QUESTION, tagLimit=50, postLimit=args.limit)
+            print("Sentiment analysis over 'Answer' posts")
+            answer_sentiments = get_post_sentiments(so_posts, postType=PostType.ANSWER, tagLimit=50, postLimit=args.limit)
         elif args.question == 3:
             pass
         elif args.question == 4:
