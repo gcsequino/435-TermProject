@@ -171,7 +171,6 @@ if __name__ == "__main__":
             question_comment_sentiment, answer_comment_sentiment = get_comment_sentiments(so_posts,
                                                                                           so_comments,
                                                                                           tagLimit=50)
-            print(question_comment_sentiment.first())
             avg_q_comment_sentiments = question_comment_sentiment.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
