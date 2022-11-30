@@ -105,6 +105,24 @@ def add_sentiment(df, column_to_analyze):
         .withColumn('compound', df_with_sentiment["sentiments"].getItem('compound'))
     return df_with_sentiment
 
+def get_comment_sentiments(posts, comments, tagLimit):
+    top_tags = get_top_tags(posts, tagLimit)
+    questions = get_questions_with_tags(posts, top_tags)
+    #print('Top questions: ', questions.count())
+    answers = get_answers_for_tags(posts, top_tags)
+    #print('Top answers: ', answers.count())
+
+    q_comments = comments.join(questions, comments._PostId == questions._Id, 'leftsemi')
+    q_comments = q_comments.join(questions, q_comments._PostId == questions._Id, 'leftouter').select(q_comments._Id, '_PostId', '_Text', '_Tags')
+
+    a_comments = comments.join(answers, comments._PostId == answers._Id, 'leftsemi')
+    a_comments = a_comments.join(answers, a_comments._PostId == answers._Id, 'leftouter').select(a_comments._Id, '_PostId', '_Text', '_Tags')
+
+    # print('Total comments: ', comments.count())
+    # print('Comments on top questions: ', q_comments.count())
+    # print('Comments on top answers: ', a_comments.count())
+
+    return add_sentiment(q_comments, '_Text'), add_sentiment(a_comments, '_Text')
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -125,14 +143,20 @@ if __name__ == "__main__":
     context.addPyFile("CommentSentimentAnalyzer.py")
     context.setLogLevel("ERROR")
     print("Starting ...")
+
     so_users = spark.read.parquet(os.path.join(args.data_dir, "Users.parquet"))
     print("Users schema")
     so_users.printSchema()
     print("User count", so_users.count(), end="\n\n")
+
     so_posts = spark.read.parquet(os.path.join(args.data_dir, "Posts.parquet"))
     print("Posts schema")
     so_posts.printSchema()
     print("Post count", so_posts.count(), end="\n\n")
+    
+    so_comments = spark.read.parquet(os.path.join(args.data_dir, "Comments.parquet"))
+    print("Comments schema")
+    so_comments.printSchema()
 
     if args.question:
         if args.question == 1:
@@ -143,7 +167,19 @@ if __name__ == "__main__":
             print("Sentiment analysis over 'Answer' posts")
             answer_sentiments = get_post_sentiments(so_posts, postType=PostType.ANSWER, tagLimit=50, postLimit=args.limit)
         elif args.question == 3:
-            pass
+            # What is the sentiment of "Comments" linked to posts in the top N subjects?
+            question_comment_sentiment, answer_comment_sentiment = get_comment_sentiments(so_posts,
+                                                                                          so_comments,
+                                                                                          tagLimit=50)
+            print(question_comment_sentiment.first())
+            avg_q_comment_sentiments = question_comment_sentiment.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
+                                                                                                avg('negative').alias('average_negative'),
+                                                                                                avg('neutral').alias('average_neutral'),
+                                                                                                avg('compound').alias('average_compound'))
+            avg_a_comment_sentiments = answer_comment_sentiment.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
+                                                                                                avg('negative').alias('average_negative'),
+                                                                                                avg('neutral').alias('average_neutral'),
+                                                                                                avg('compound').alias('average_compound'))
         elif args.question == 4:
             pass
         elif args.question == 5:

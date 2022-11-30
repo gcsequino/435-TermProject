@@ -11,7 +11,11 @@ class CommentSentimentAnalyzer():
         return self.sid.polarity_scores(cleaned_comment)
 
     def remove_html_tags(self, comment):
-        return BeautifulSoup(comment, "html.parser").text
+        try:
+            return BeautifulSoup(comment, "html.parser").text
+        except:
+            return ""
+
 
 if __name__ == "__main__":
     csa = CommentSentimentAnalyzer()
