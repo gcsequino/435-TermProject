@@ -7,6 +7,7 @@ from CommentSentimentAnalyzer import CommentSentimentAnalyzer
 import argparse
 import os
 import re
+import matplotlib as plt
 
 class PostType(Enum):
     QUESTION = 1
@@ -124,6 +125,11 @@ def get_comment_sentiments(posts, comments, tagLimit):
 
     return add_sentiment(q_comments, '_Text'), add_sentiment(a_comments, '_Text')
 
+def create_plot(df, name):
+    plot = df.plot.bar(x=0, stacked=True)
+    fig = plot.get_figure()
+    fig.savefig(name)
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("-s", "--spark", type=str, required=False,
@@ -170,7 +176,7 @@ if __name__ == "__main__":
             # What is the sentiment of "Comments" linked to posts in the top N subjects?
             question_comment_sentiment, answer_comment_sentiment = get_comment_sentiments(so_posts,
                                                                                           so_comments,
-                                                                                          tagLimit=50)
+                                                                                          tagLimit=20)
             avg_q_comment_sentiments = question_comment_sentiment.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
@@ -179,6 +185,15 @@ if __name__ == "__main__":
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
                                                                                                 avg('compound').alias('average_compound'))
+            pdq_top = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.desc()).limit(10).toPandas()
+            create_plot(pdq_top, 'pdq_top.png')
+            pdq_bot = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.asc()).limit(10).toPandas()
+            create_plot(pdq_bot, 'pdq_bot.png')
+
+            pda_top = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.desc()).limit(10).toPandas()
+            create_plot(pda_top, 'pda_top.png')
+            pda_bot = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.asc()).limit(10).toPandas()
+            create_plot(pda_bot, 'pda_bot.png')
         elif args.question == 4:
             pass
         elif args.question == 5:
