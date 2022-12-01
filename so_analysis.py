@@ -1,7 +1,7 @@
 from enum import Enum
 from pyspark import SparkContext
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import udf, explode, count, col, avg, broadcast
+from pyspark.sql.functions import udf, explode, count, col, avg, broadcast, mean
 from pyspark.sql.types import MapType, StringType, ArrayType
 from CommentSentimentAnalyzer import CommentSentimentAnalyzer
 import numpy as np
@@ -57,9 +57,9 @@ def get_questions_with_tags(posts, tags, limit=None):
 
 def get_answers_for_tags(posts, tags, limit=None):
     question_posts = get_questions_with_tags(posts, tags).alias("questions")
-    answer_posts = posts.select("_Id", "_Body", "_ParentId").where("_PostTypeId == 2").alias("answers")
+    answer_posts = posts.select("_Id", "_Body", "_ParentId", "_OwnerUserId").where("_PostTypeId == 2").alias("answers")
     questions_with_answers = question_posts.join(answer_posts, col("questions._Id") == col("answers._ParentId"))
-    answers = questions_with_answers.select(col("answers._Id"), col("answers._Body"), col("questions._Tags"))
+    answers = questions_with_answers.select(col("answers._Id"), col("answers._Body"), col("questions._Tags"), col("answers._OwnerUserId"))
     if limit:
         answers = answers.limit(limit)
     return answers
@@ -96,6 +96,42 @@ def get_experts_by_reputation(users_df, posts_df):
 
     experts_sentiment_df.orderBy(col('average_negative').desc()).show(top_n)
 
+def get_experts_by_subject(users, posts, m_users=50, n_subjects=20):
+    top_tags_df = get_top_tags(posts, n_subjects)
+    top_tags_df.show()
+
+    answers_with_tags = get_answers_for_tags(posts, top_tags_df)
+
+    users_per_tag = {} # <tag, df of users>
+
+    for tag in top_tags_df.select("_Tags").collect():
+        tag_answers_df = answers_with_tags.filter(answers_with_tags._Tags == tag._Tags) # get all answers for specific tag
+
+        # get sentiments for each accepted answer
+        tag_answers_df_with_sentiment = add_sentiment(tag_answers_df, "_Body")
+
+        experts_sentiment_df = tag_answers_df_with_sentiment.groupBy(['_OwnerUserId']).agg(avg('positive').alias('average_positive'),
+                                                                                                     avg('negative').alias('average_negative'),
+                                                                                                     avg('neutral').alias('average_neutral'),
+                                                                                                     avg('compound').alias('average_compound'),
+                                                                                                     count('_OwnerUserId').alias('total_accepted_answers'))
+
+        # order tag_answers_df by the count of user id
+        top_users_sorted = experts_sentiment_df.orderBy("total_accepted_answers", ascending=False).limit(m_users).dropna()
+        
+        # users_with_accepted_answers = users.join(answers # get users with accepted answers
+        top_m_users = users.join(top_users_sorted, users._Id == top_users_sorted._OwnerUserId, "inner").orderBy("total_accepted_answers", ascending=False)
+
+        # upvotes / downvotes
+        top_m_users = top_m_users.withColumn("UpVotesToDownVotes", (top_m_users._UpVotes / top_m_users._DownVotes))
+
+        users_per_tag[tag._Tags] = top_m_users.select(top_m_users._DisplayName, top_m_users._Id, top_m_users.total_accepted_answers, top_m_users.average_compound, top_m_users.average_negative, top_m_users.average_neutral, top_m_users.average_positive, top_m_users.UpVotesToDownVotes)
+
+        average_sentiments = top_m_users.select(mean(top_m_users.total_accepted_answers), mean(top_m_users.average_compound), mean(top_m_users.average_negative), mean(top_m_users.average_neutral), mean(top_m_users.average_positive), mean(top_m_users.UpVotesToDownVotes))
+
+        users_per_tag[tag._Tags + "_AVGS"] = average_sentiments
+
+    return users_per_tag
 
 def add_sentiment(df, column_to_analyze):
     # Adds sentiment columns to dataframe
@@ -210,7 +246,9 @@ if __name__ == "__main__":
                                                                                                 avg('neutral').alias('average_neutral'),
                                                                                                 avg('compound').alias('average_compound'))
         elif args.question == 4:
-            pass
+            print("Top M 'experts' per top N subjects.")
+            experts_by_subject_df = get_experts_by_subject(so_users, so_posts, m_users=50, n_subjects=args.limit)                
+            
         elif args.question == 5:
             experts_by_rep_df = get_experts_by_reputation(so_users, so_posts)
 
