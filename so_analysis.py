@@ -66,7 +66,12 @@ def get_answers_for_tags(posts, tags, limit=None):
 
 def get_post_sentiments(posts, postType: PostType, tagLimit=None, postLimit=None) -> DataFrame:
     top_tags = get_top_tags(posts, tagLimit)
-    if postType == PostType.QUESTION.tag_answers_d:
+    if postType == PostType.QUESTION:
+        posts_with_tags = get_questions_with_tags(posts, top_tags, postLimit)
+    elif postType == PostType.ANSWER:
+        posts_with_tags = get_answers_for_tags(posts, top_tags, postLimit)
+    else:
+        print("Uknown post type", postType)
         return
     posts_with_tags = add_sentiment(posts_with_tags, "_Body")
     avg_sentiments = posts_with_tags.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
