@@ -1,7 +1,10 @@
 from enum import Enum
 from pyspark import SparkContext
+
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import udf, explode, count, col, avg, broadcast, mean
+from pyspark.sql.functions import udf, explode, count, col, avg, broadcast, when, mean
+import pyspark.sql.functions as psf
+
 from pyspark.sql.types import MapType, StringType, ArrayType
 from CommentSentimentAnalyzer import CommentSentimentAnalyzer
 import numpy as np
@@ -81,20 +84,36 @@ def get_post_sentiments(posts, postType: PostType, tagLimit=None, postLimit=None
     return avg_sentiments
 
 def get_experts_by_reputation(users_df, posts_df):
-    top_n = 50
+    top_n = 100
     experts_by_rep_df = users_df.orderBy(col('_Reputation').desc()).limit(top_n).withColumnRenamed('_Id', 'UserId')
     #for row in experts_by_rep_df.take(experts_by_rep_df):
     #    print(f"{row['_DisplayName']}, Rep: {row['_Reputation']}, U: {row['_UpVotes']}, D: {row['_DownVotes']}, V: {row['_Views']}, U/D: {row['_UpVotes']/row['_DownVotes'] if row['_DownVotes'] else row['_UpVotes']}")
     expert_posts_df = posts_df.join(experts_by_rep_df, posts_df['_OwnerUserId'] == experts_by_rep_df['UserId'])
     expert_posts_df_with_sentiment = add_sentiment(expert_posts_df, '_Body')
+    expert_posts_df_with_sentiment.show(5)
     experts_sentiment_df = expert_posts_df_with_sentiment.groupBy(['UserId', '_DisplayName']).agg(avg('positive').alias('average_positive'),
                                                                                                   avg('negative').alias('average_negative'),
                                                                                                   avg('neutral').alias('average_neutral'),
                                                                                                   avg('compound').alias('average_compound'),
+                                                                                                  psf.sum('overall_is_positive').alias('total_positive'),
+                                                                                                  psf.sum('overall_is_negative').alias('total_negative'),
                                                                                                   avg(col('_UpVotes') / col('_DownVotes')).alias('UpVotesToDownVotes'),
                                                                                                   count('_Id'))
 
-    experts_sentiment_df.orderBy(col('average_negative').desc()).show(top_n)
+    experts_sentiment_df.orderBy(col('average_negative').desc()).repartition(1).write.mode('overwrite').options(header='True', delimiter=',').csv('/tmp/expert_sentiment.csv')
+
+
+def get_average_sentiment(posts_df):
+    print("Getting overall sentiment metrics")
+    posts_df_with_sentiment = add_sentiment(posts_df, '_Body')
+    posts_df_with_sentiment = posts_df_with_sentiment.select(avg('positive').alias('average_positive'), 
+                                                             avg('negative').alias('average_negative'),
+                                                             avg('neutral').alias('average_neutral'),
+                                                             avg('compound').alias('average_compound'),
+                                                             psf.sum('overall_is_positive').alias('total_positive'),
+                                                             psf.sum('overall_is_negative').alias('total_negative'),
+                                                             count('positive').alias('total_count'))
+    posts_df_with_sentiment.repartition(1).write.mode('overwrite').options(header='True', delimiter=',').csv('/tmp/overall_sentiment.csv')
 
 def get_experts_by_subject(users, posts, m_users=50, n_subjects=20):
     top_tags_df = get_top_tags(posts, n_subjects)
@@ -143,6 +162,8 @@ def add_sentiment(df, column_to_analyze):
         .withColumn('positive', df_with_sentiment["sentiments"].getItem('pos'))\
         .withColumn('neutral', df_with_sentiment["sentiments"].getItem('neu'))\
         .withColumn('compound', df_with_sentiment["sentiments"].getItem('compound'))
+    df_with_sentiment = df_with_sentiment.withColumn('overall_is_positive', when(col('compound') > 0.05, 1).otherwise(0))
+    df_with_sentiment = df_with_sentiment.withColumn('overall_is_negative', when(col('compound') < -0.05, 1).otherwise(0))
     return df_with_sentiment
 
 def get_comment_sentiments(posts, comments, tagLimit):
@@ -251,6 +272,7 @@ if __name__ == "__main__":
             
         elif args.question == 5:
             experts_by_rep_df = get_experts_by_reputation(so_users, so_posts)
+            get_average_sentiment(so_posts)
 
     else:
         # Run all?
