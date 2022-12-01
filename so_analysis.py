@@ -181,12 +181,7 @@ if __name__ == "__main__":
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
                                                                                                 avg('compound').alias('average_compound'))
-        #     pdq_top = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.desc()).limit(10).write.csv('pdq_top.csv')
-        #     pdq_bot = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.asc()).limit(10).write.csv('pdq_bot.csv')
-
-        #     pda_top = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.desc()).limit(10).write.csv('pda_top.csv')
-        #     pda_bot = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.asc()).limit(10).write.csv('pda_bot.csv')
-        # elif args.question == 4:
+        elif args.question == 4:
             pass
         elif args.question == 5:
             experts_by_rep_df = get_experts_by_reputation(so_users, so_posts)
