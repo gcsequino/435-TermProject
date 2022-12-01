@@ -125,11 +125,6 @@ def get_comment_sentiments(posts, comments, tagLimit):
 
     return add_sentiment(q_comments, '_Text'), add_sentiment(a_comments, '_Text')
 
-def create_plot(df, name):
-    plot = df.plot.bar(x=0, stacked=True)
-    fig = plot.get_figure()
-    fig.savefig(name)
-
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("-s", "--spark", type=str, required=False,
@@ -181,20 +176,17 @@ if __name__ == "__main__":
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
                                                                                                 avg('compound').alias('average_compound'))
+            avg_q_comment_sentiments.printSchema()
             avg_a_comment_sentiments = answer_comment_sentiment.groupBy("_Tags").agg(avg('positive').alias('average_positive'),
                                                                                                 avg('negative').alias('average_negative'),
                                                                                                 avg('neutral').alias('average_neutral'),
                                                                                                 avg('compound').alias('average_compound'))
-            pdq_top = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.desc()).limit(10).toPandas()
-            create_plot(pdq_top, 'pdq_top.png')
-            pdq_bot = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.asc()).limit(10).toPandas()
-            create_plot(pdq_bot, 'pdq_bot.png')
+        #     pdq_top = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.desc()).limit(10).write.csv('pdq_top.csv')
+        #     pdq_bot = avg_q_comment_sentiments.sort(avg_q_comment_sentiments.average_compound.asc()).limit(10).write.csv('pdq_bot.csv')
 
-            pda_top = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.desc()).limit(10).toPandas()
-            create_plot(pda_top, 'pda_top.png')
-            pda_bot = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.asc()).limit(10).toPandas()
-            create_plot(pda_bot, 'pda_bot.png')
-        elif args.question == 4:
+        #     pda_top = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.desc()).limit(10).write.csv('pda_top.csv')
+        #     pda_bot = avg_a_comment_sentiments.sort(avg_a_comment_sentiments.average_compound.asc()).limit(10).write.csv('pda_bot.csv')
+        # elif args.question == 4:
             pass
         elif args.question == 5:
             experts_by_rep_df = get_experts_by_reputation(so_users, so_posts)
