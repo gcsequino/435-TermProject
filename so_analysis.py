@@ -1,9 +1,12 @@
 from enum import Enum
 from pyspark import SparkContext
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import udf, explode, count, col, avg, broadcast
 from pyspark.sql.types import MapType, StringType, ArrayType
 from CommentSentimentAnalyzer import CommentSentimentAnalyzer
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 import argparse
 import os
 import re
@@ -35,7 +38,7 @@ def split_post_tags(df, tagId="_Tags"):
     split_tags = split_tags.withColumnRenamed(f"{tagId}_exploded", tagId)
     return split_tags
 
-def get_top_tags(posts, limit=None):
+def get_top_tags(posts, limit=None) -> DataFrame:
     post_tags = posts.select("_Tags").dropna()
     all_tags = split_post_tags(post_tags, "_Tags")
     tags = all_tags.groupBy("_Tags").agg(count("_Tags").alias("counts")).orderBy("counts", ascending=False)
@@ -61,7 +64,7 @@ def get_answers_for_tags(posts, tags, limit=None):
         answers = answers.limit(limit)
     return answers
 
-def get_post_sentiments(posts, postType: PostType, tagLimit=None, postLimit=None):
+def get_post_sentiments(posts, postType: PostType, tagLimit=None, postLimit=None) -> DataFrame:
     top_tags = get_top_tags(posts, tagLimit)
     if postType == PostType.QUESTION:
         posts_with_tags = get_questions_with_tags(posts, top_tags, postLimit)
@@ -125,6 +128,28 @@ def get_comment_sentiments(posts, comments, tagLimit):
 
     return add_sentiment(q_comments, '_Text'), add_sentiment(a_comments, '_Text')
 
+def generate_Q1_figures(top_tags: DataFrame):
+    top_tags = dict(top_tags.collect())
+    fig, ax = plt.subplots()
+    ax.bar(top_tags.keys(), list(map(lambda val: val/1E6, top_tags.values())))
+    ax.tick_params(axis="x", rotation=75)
+    ax.set_ylabel("number of posts in millions")
+    ax.set_ylim(0, 3)
+    ax.autoscale(enable=False, axis="y")
+    ax.set_title("Top 20 tag count")
+    fig.tight_layout()
+    fig.savefig("top_tags.png")
+
+def generate_Q2_figures(post_sentiments: DataFrame, name_prefix):
+    post_sentiments = dict(post_sentiments.select("_Tags", "average_compound").orderBy("average_compound", ascending=False).collect())
+    fig, axes = plt.subplots()
+    axes.set_title(f"Polarity of {name_prefix}")
+    axes.bar(post_sentiments.keys(), post_sentiments.values())
+    axes.tick_params(axis="x", rotation=75)
+    axes.set_ylabel("Average compound polarity")
+    fig.tight_layout()
+    fig.savefig(f"{name_prefix}_polarity.png")
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("-s", "--spark", type=str, required=False,
@@ -162,11 +187,14 @@ if __name__ == "__main__":
     if args.question:
         if args.question == 1:
             top_tag_df = get_top_tags(so_posts, limit=args.limit)
+            generate_Q1_figures(top_tag_df)
         elif args.question == 2:
             print("Sentiment analysis over 'Question' posts")
-            question_sentiments = get_post_sentiments(so_posts, postType=PostType.QUESTION, tagLimit=50, postLimit=args.limit)
+            question_sentiments = get_post_sentiments(so_posts, postType=PostType.QUESTION, tagLimit=20, postLimit=args.limit)
+            generate_Q2_figures(question_sentiments, "Questions")
             print("Sentiment analysis over 'Answer' posts")
-            answer_sentiments = get_post_sentiments(so_posts, postType=PostType.ANSWER, tagLimit=50, postLimit=args.limit)
+            answer_sentiments = get_post_sentiments(so_posts, postType=PostType.ANSWER, tagLimit=20, postLimit=args.limit)
+            generate_Q2_figures(answer_sentiments, "Answers")
         elif args.question == 3:
             # What is the sentiment of "Comments" linked to posts in the top N subjects?
             question_comment_sentiment, answer_comment_sentiment = get_comment_sentiments(so_posts,
